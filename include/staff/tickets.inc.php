@@ -166,7 +166,8 @@ if ($_REQUEST['advsid'] && isset($_SESSION['adv_'.$_REQUEST['advsid']])) {
 $sortOptions=array('date'=>'effective_date','ID'=>'ticket.`number`*1',
     'pri'=>'pri.priority_urgency','name'=>'user.name','subj'=>'cdata.subject',
     'status'=>'status.name','assignee'=>'assigned','staff'=>'staff',
-    'dept'=>'dept.dept_name');
+    'dept'=>'dept.dept_name', 'proyecto'=>'cdata.proyecto', 'ayuda'=>'helptopic',
+    'plan'=>'sla_name', 'creacion'=>'ticket.created');
 
 $orderWays=array('DESC'=>'DESC','ASC'=>'ASC');
 
@@ -217,7 +218,7 @@ if($_GET['limit'])
 $qselect ='SELECT ticket.ticket_id,tlock.lock_id,ticket.`number`,ticket.dept_id,ticket.staff_id,ticket.team_id '
     .' ,user.name'
     .' ,email.address as email, dept.dept_name, status.state '
-         .' ,status.name as status,ticket.source,ticket.isoverdue,ticket.isanswered,ticket.created ';
+    .' ,status.name as status,ticket.source,ticket.isoverdue,ticket.isanswered,ticket.created ';
 
 $qfrom=' FROM '.TICKET_TABLE.' ticket '.
        ' LEFT JOIN '.TICKET_STATUS_TABLE. ' status
@@ -254,7 +255,8 @@ $qselect.=' ,IF(ticket.duedate IS NULL,IF(sla.id IS NULL, NULL, DATE_ADD(ticket.
          .' ,ticket.created as ticket_created, CONCAT_WS(" ", staff.firstname, staff.lastname) as staff, team.name as team '
          .' ,IF(staff.staff_id IS NULL,team.name,CONCAT_WS(" ", staff.lastname, staff.firstname)) as assigned '
          .' ,IF(ptopic.topic_pid IS NULL, topic.topic, CONCAT_WS(" / ", ptopic.topic, topic.topic)) as helptopic '
-         .' ,cdata.priority as priority_id, cdata.subject, pri.priority_desc, pri.priority_color';
+         .' ,cdata.priority as priority_id, cdata.subject, pri.priority_desc, pri.priority_color, sla.name as sla_name, cdata.proyecto as cdata_project'
+         .' ,cdata.tiempo_desarrollo as cdata_tiempo_desarrollo';
 
 $qfrom.=' LEFT JOIN '.TICKET_LOCK_TABLE.' tlock ON (ticket.ticket_id=tlock.ticket_id AND tlock.expire>NOW()
                AND tlock.staff_id!='.db_input($thisstaff->getId()).') '
@@ -304,9 +306,22 @@ if ($results) {
         GROUP BY ticket.ticket_id';
     $ids_res = db_query($counts_sql);
     while ($row = db_fetch_array($ids_res)) {
-        $results[$row['ticket_id']] += $row;
+        $results[$row['ticket_id']]+= $row;
     }
+
+    $query_proyecto = 'SELECT litems.value as litems_nombre, litems.id as litems_id FROM ost_list_items litems WHERE litems.list_id=2';
+    $res = db_query($query_proyecto);
+    $nombres = array();
+    while($result = db_fetch_array($res)){
+        $nombres[$result['litems_id']] = $result['litems_nombre'];
+    }
+    foreach ($results as $llave => $row) {
+        $var_row = preg_split("/,/",$row['cdata_project']);
+        $results[$llave]['cdata_project'] = $nombres[$var_row[0]];   
+    }  
 }
+
+ 
 
 //YOU BREAK IT YOU FIX IT.
 ?>
@@ -368,47 +383,33 @@ if ($results) {
 	        <th width="70">
                 <a <?php echo $id_sort; ?> href="tickets.php?sort=ID&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
                     title="<?php echo sprintf(__('Sort by %s %s'), __('Ticket ID'), __($negorder)); ?>"><?php echo __('Ticket'); ?></a></th>
-	        <th width="70">
-                <a  <?php echo $date_sort; ?> href="tickets.php?sort=date&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
-                    title="<?php echo sprintf(__('Sort by %s %s'), __('Date'), __($negorder)); ?>"><?php echo __('Date'); ?></a></th>
 	        <th width="280">
                  <a <?php echo $subj_sort; ?> href="tickets.php?sort=subj&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
                     title="<?php echo sprintf(__('Sort by %s %s'), __('Subject'), __($negorder)); ?>"><?php echo __('Subject'); ?></a></th>
-            <th width="170">
-                <a <?php echo $name_sort; ?> href="tickets.php?sort=name&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
-                     title="<?php echo sprintf(__('Sort by %s %s'), __('Name'), __($negorder)); ?>"><?php echo __('From');?></a></th>
-            <?php
-            if($search && !$status) { ?>
-                <th width="60">
-                    <a <?php echo $status_sort; ?> href="tickets.php?sort=status&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
-                        title="<?php echo sprintf(__('Sort by %s %s'), __('Status'), __($negorder)); ?>"><?php echo __('Status');?></a></th>
-            <?php
-            } else { ?>
-                <th width="60" <?php echo $pri_sort;?>>
-                    <a <?php echo $pri_sort; ?> href="tickets.php?sort=pri&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
-                        title="<?php echo sprintf(__('Sort by %s %s'), __('Priority'), __($negorder)); ?>"><?php echo __('Priority');?></a></th>
-            <?php
-            }
+            <th width="60">
+                <a <?php echo $status_sort; ?> href="tickets.php?sort=status&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
+                    title="<?php echo sprintf(__('Sort by %s %s'), __('Status'), __($negorder)); ?>"><?php echo __('Status');?></a></th>
+            <th width="60">
+                    <a <?php echo $proyecto_sort; ?> href="tickets.php?sort=proyecto&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
+                        title="<?php echo sprintf(__('Sort by %s %s'), __('Proyecto'), __($negorder)); ?>"><?php echo __('Proyecto');?></a></th>
 
-            if($showassigned ) {
-                //Closed by
-                if(!strcasecmp($status,'closed')) { ?>
-                    <th width="150">
-                        <a <?php echo $staff_sort; ?> href="tickets.php?sort=staff&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
-                            title="<?php echo sprintf(__('Sort by %s %s'), __("Closing Agent's Name"), __($negorder)); ?>"><?php echo __('Closed By'); ?></a></th>
-                <?php
-                } else { //assigned to ?>
-                    <th width="150">
-                        <a <?php echo $assignee_sort; ?> href="tickets.php?sort=assignee&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
-                            title="<?php echo sprintf(__('Sort by %s %s'), __('Assignee'), __($negorder)); ?>"><?php echo __('Assigned To'); ?></a></th>
-                <?php
-                }
-            } else { ?>
-                <th width="150">
-                    <a <?php echo $dept_sort; ?> href="tickets.php?sort=dept&order=<?php echo $negorder;?><?php echo $qstr; ?>"
-                        title="<?php echo sprintf(__('Sort by %s %s'), __('Department'), __($negorder)); ?>"><?php echo __('Department');?></a></th>
-            <?php
-            } ?>
+            <th width="60">
+                    <a <?php echo $ayuda_sort; ?> href="tickets.php?sort=ayuda&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
+                        title="<?php echo sprintf(__('Sort by %s %s'), __('Help Topic'), __($negorder)); ?>"><?php echo __('Help Topic');?></a></th>
+
+            <th width="60">
+                    <a <?php echo $plan_sort; ?> href="tickets.php?sort=plan&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
+                        title="<?php echo sprintf(__('Sort by %s %s'), __('SLA Plan'), __($negorder)); ?>"><?php echo __('SLA Plan');?></a></th>
+
+            <th width="60">
+                    <a href="tickets.php"><?php echo __('Horas Estimadas');?></a></th>
+
+            <th width="60">
+                    <a href="tickets.php"><?php echo __('Horas Transcurridas');?></a></th>
+
+            <th width="60">
+                    <a <?php echo $creacion_sort; ?> href="tickets.php?sort=creacion&order=<?php echo $negorder; ?><?php echo $qstr; ?>"
+                        title="<?php echo sprintf(__('Sort by %s %s'), __('Fecha'), __($negorder)); ?>"><?php echo __('Fecha');?></a></th>
         </tr>
      </thead>
      <tbody>
@@ -464,7 +465,9 @@ if ($results) {
                   <a class="Icon <?php echo strtolower($row['source']); ?>Ticket ticketPreview"
                     title="<?php echo __('Preview Ticket'); ?>"
                     href="tickets.php?id=<?php echo $row['ticket_id']; ?>"><?php echo $tid; ?></a></td>
+                <?php /*
                 <td align="center" nowrap><?php echo Format::db_datetime($row['effective_date']); ?></td>
+                */ ?>
                 <td><a <?php if ($flag) { ?> class="Icon <?php echo $flag; ?>Ticket" title="<?php echo ucfirst($flag); ?> Ticket" <?php } ?>
                     href="tickets.php?id=<?php echo $row['ticket_id']; ?>"><?php echo $subject; ?></a>
                      <?php
@@ -477,21 +480,54 @@ if ($results) {
                             echo '<i class="icon-fixed-width icon-paperclip"></i>&nbsp;';
                     ?>
                 </td>
-                <td nowrap>&nbsp;<?php echo Format::htmlchars(
-                        Format::truncate($row['name'], 22, strpos($row['name'], '@'))); ?>&nbsp;</td>
+                <td>
                 <?php
-                if($search && !$status){
                     $displaystatus=ucfirst($row['status']);
                     if(!strcasecmp($row['state'],'open'))
                         $displaystatus="<b>$displaystatus</b>";
-                    echo "<td>$displaystatus</td>";
-                } else { ?>
-                <td class="nohover" align="center" style="background-color:<?php echo $row['priority_color']; ?>;">
-                    <?php echo $row['priority_desc']; ?></td>
-                <?php
-                }
+                    echo "$displaystatus";
                 ?>
-                <td nowrap>&nbsp;<?php echo $lc; ?></td>
+               </td>
+                <td>
+                    <?php 
+                        $project = $row['cdata_project'];
+                        echo $project;
+                    ?>
+                </td>
+                <td>
+                    <?php echo $row['helptopic']; ?>
+                </td>
+                <td>
+                    <?php echo ucfirst($row['sla_name']); ?>
+                </td>
+                <td>
+                    <?php
+                        $developtime = ucfirst($row['cdata_tiempo_desarrollo']);
+                        if(trim($developtime) != ''){
+                            echo $developtime." hora(s)";
+                        } else {
+                            echo "No estimado";
+                        }
+                    ?>
+                </td>
+                <td>
+                    <?php
+                        $creationdate = $row['ticket_created'];
+                        $t1 = new DateTime($creationdate);
+                        $t2 = new DateTime();
+                        $interval = $t1->diff($t2);
+                        $hours = $interval->h;
+                        $hours = $hours + ($interval->days*24);
+                        if($hours == "1"){
+                            echo "$hours hora";
+                        } else { 
+                            echo "$hours horas";
+                        }
+                    ?>
+                </td>
+                <td>
+                    <?php echo "$creationdate"; ?>
+                </td>
             </tr>
             <?php
             } //end of while.

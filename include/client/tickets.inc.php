@@ -1,6 +1,5 @@
 <?php
 if(!defined('OSTCLIENTINC') || !is_object($thisclient) || !$thisclient->isValid()) die('Access Denied');
-
 $qs = array();
 $status=null;
 if(isset($_REQUEST['status'])) { //Query string status has nothing to do with the real status used below.
@@ -46,13 +45,17 @@ $$x=' class="'.strtolower($order).'" ';
 
 $qselect='SELECT ticket.ticket_id,ticket.`number`,ticket.dept_id,isanswered, '
     .'dept.ispublic, cdata.subject,'
-    .'dept_name, status.name as status, status.state, ticket.source, ticket.created ';
+    .'IF(ptopic.topic_pid IS NULL, topic.topic, CONCAT_WS(" / ", ptopic.topic, topic.topic)) as helptopic,'
+    .'dept_name, status.name as status, status.state, ticket.source, ticket.created,sla.name as sla_name, cdata.proyecto as cdata_project';
 
 $qfrom='FROM '.TICKET_TABLE.' ticket '
       .' LEFT JOIN '.TICKET_STATUS_TABLE.' status
             ON (status.id = ticket.status_id) '
       .' LEFT JOIN '.TABLE_PREFIX.'ticket__cdata cdata ON (cdata.ticket_id = ticket.ticket_id)'
       .' LEFT JOIN '.DEPT_TABLE.' dept ON (ticket.dept_id=dept.dept_id) '
+      .' LEFT JOIN '.SLA_TABLE.' sla ON (ticket.sla_id=sla.id AND sla.isactive=1) '
+      .' LEFT JOIN '.TOPIC_TABLE.' topic ON (ticket.topic_id=topic.topic_id) '
+      .' LEFT JOIN '.TOPIC_TABLE.' ptopic ON (ptopic.topic_id=topic.topic_pid) '
       .' LEFT JOIN '.TICKET_COLLABORATOR_TABLE.' collab
         ON (collab.ticket_id = ticket.ticket_id
                 AND collab.user_id ='.$thisclient->getId().' )';
@@ -152,8 +155,14 @@ $negorder=$order=='DESC'?'ASC':'DESC'; //Negate the sorting
             <th width="320">
                 <a href="tickets.php?sort=subj&order=<?php echo $negorder; ?><?php echo $qstr; ?>" title="Sort By Subject"><?php echo __('Subject');?></a>
             </th>
-            <th width="120">
-                <a href="tickets.php?sort=dept&order=<?php echo $negorder; ?><?php echo $qstr; ?>" title="Sort By Department"><?php echo __('Department');?></a>
+            <th width="320">
+                <a href="tickets.php?sort=subj&order=<?php echo $negorder; ?><?php echo $qstr; ?>" title="Sort By Help Topic"><?php echo __('Help Topic');?></a>
+            </th>
+            <th width="320">
+                <a href="tickets.php?sort=subj&order=<?php echo $negorder; ?><?php echo $qstr; ?>" title="Sort By SLA Plan"><?php echo __('SLA Plan');?></a>
+            </th>
+            <th width="320">
+                <a href="tickets.php?sort=subj&order=<?php echo $negorder; ?><?php echo $qstr; ?>" title="Sort By Project"><?php echo __('Proyecto');?></a>
             </th>
         </tr>
     </thead>
@@ -162,7 +171,16 @@ $negorder=$order=='DESC'?'ASC':'DESC'; //Negate the sorting
      $subject_field = TicketForm::objects()->one()->getField('subject');
      if($res && ($num=db_num_rows($res))) {
         $defaultDept=Dept::getDefaultDeptName(); //Default public dept.
+        $query_proyecto = 'SELECT litems.value as litems_nombre, litems.id as litems_id FROM ost_list_items litems WHERE litems.list_id=2';
+        $res2 = db_query($query_proyecto);
+        $nombres = array();
+        while($resultado = db_fetch_array($res2)){
+            $nombres[$resultado['litems_id']] = $resultado['litems_nombre'];
+        }
         while ($row = db_fetch_array($res)) {
+            $var_row = preg_split("/,/",$row['cdata_project']);
+            $row['cdata_project'] = $nombres[$var_row[0]];   
+
             $dept= $row['ispublic']? $row['dept_name'] : $defaultDept;
             $subject = Format::truncate($subject_field->display(
                 $subject_field->to_php($row['subject']) ?: $row['subject']
@@ -186,7 +204,15 @@ $negorder=$order=='DESC'?'ASC':'DESC'; //Negate the sorting
                 <td>
                     <a href="tickets.php?id=<?php echo $row['ticket_id']; ?>"><?php echo $subject; ?></a>
                 </td>
-                <td>&nbsp;<?php echo Format::truncate($dept,30); ?></td>
+                 <td>
+                    <?php echo $row['helptopic']; ?>
+                </td>
+                <td>
+                    <?php echo $row['sla_name']; ?>
+                </td>
+                <td>
+                    <?php echo $row['cdata_project']; ?>
+                </td>
             </tr>
         <?php
         }
@@ -201,4 +227,143 @@ $negorder=$order=='DESC'?'ASC':'DESC'; //Negate the sorting
 if($res && $num>0) {
     echo '<div>&nbsp;'.__('Page').':'.$pageNav->getPageLinks().'&nbsp;</div>';
 }
+
 ?>
+
+<hr/>
+<h2><?php echo __('Statistics'); ?>&nbsp;</h2>
+<br>
+    <?php 
+    $qselect='SELECT ticket.ticket_id,ticket.`number`,ticket.topic_id, ticket.status_id, ticket.isoverdue, ticket.reopened,'
+    .'IF(ptopic.topic_pid IS NULL, topic.topic, CONCAT_WS(" / ", ptopic.topic, topic.topic)) as helptopic,'
+    .'status.name as status, status.state, cdata.proyecto as cdata_project FROM ost_ticket ticket '
+      .' LEFT JOIN ost_ticket_status status
+            ON (status.id = ticket.status_id) '
+      .' LEFT JOIN '.TABLE_PREFIX.'ticket__cdata cdata ON (cdata.ticket_id = ticket.ticket_id)'
+      .' LEFT JOIN '.TOPIC_TABLE.' topic ON (ticket.topic_id=topic.topic_id) '
+      .' LEFT JOIN '.TOPIC_TABLE.' ptopic ON (ptopic.topic_id=topic.topic_pid)';
+
+
+    $resp3 = db_query($qselect);
+
+    $contadorProyectos = array();
+    $contadorEstados = array();
+
+    $arrayTickets = array();
+    while($result = db_fetch_array($resp3)){
+        $arrayTickets[$result['ticket_id']] = $result;
+    }
+
+    foreach ($arrayTickets as $result) {
+        $var_row = preg_split("/,/",$result['cdata_project']);
+        $result['cdata_project'] = $nombres[$var_row[0]];   
+        if(!array_key_exists($result["helptopic"], $contadorEstados)){
+            $contadorEstados[$result["helptopic"]]["abiertos"]=0;
+            $contadorEstados[$result["helptopic"]]["cerrados"]=0;
+            $contadorEstados[$result["helptopic"]]["vencidos"]=0;
+            $contadorEstados[$result["helptopic"]]["reabiertos"]=0;
+        }
+        if($result["isoverdue"]=="1"){
+        //    echo $result["ticket_id"];
+        //    echo "<br>";
+            $contadorEstados[$result["helptopic"]]["vencidos"]++;
+        }
+        if ($result["reopened"]){
+            $contadorEstados[$result["helptopic"]]["reabiertos"]++;
+        }
+        if ($result["state"]=="open"){
+            $contadorEstados[$result["helptopic"]]["abiertos"]++;
+        }
+        if ($result["state"]=="closed"){
+            $contadorEstados[$result["helptopic"]]["cerrados"]++;
+        }
+
+        if(!array_key_exists($result["cdata_project"], $contadorProyectos)){
+            $contadorProyectos[$result["cdata_project"]]["incidenteCritico"]=0;
+            $contadorProyectos[$result["cdata_project"]]["mejora"]=0;
+            $contadorProyectos[$result["cdata_project"]]["incidenteBaja"]=0;
+            $contadorProyectos[$result["cdata_project"]]["incidenteMedia"]=0;
+            $contadorProyectos[$result["cdata_project"]]["incidente"]=0;
+            $contadorProyectos[$result["cdata_project"]]["incidenteAlta"]=0;
+        }
+        if($result["helptopic"]=="Incidente / Prioridad Alta"){
+            $contadorProyectos[$result["cdata_project"]]["incidenteAlta"]++;
+        } else if($result["helptopic"]=="Incidente"){
+            $contadorProyectos[$result["cdata_project"]]["incidente"]++;
+        } else if($result["helptopic"]=="Incidente / Prioridad Media"){
+            $contadorProyectos[$result["cdata_project"]]["incidenteMedia"]++;
+        } else if($result["helptopic"]=="Incidente / Prioridad Baja"){
+            $contadorProyectos[$result["cdata_project"]]["incidenteBaja"]++;
+        } else if($result["helptopic"]=="Incidente / Crítico"){
+            $contadorProyectos[$result["cdata_project"]]["incidenteCritico"]++;
+        } else if($result["helptopic"]=="Mejora"){
+            $contadorProyectos[$result["cdata_project"]]["mejora"]++;
+        }
+    }
+    
+
+    ?>
+<ul class="nav nav-tabs">
+    <li class="active"><a data-toggle="tab" href="#tablaTickets">Estado Tickets</a></li>
+    <li><a data-toggle="tab" href="#tablaProyectos">Proyectos</a></li>
+</ul>
+<div class="tab-content">
+    <div id="tablaTickets" class="tab-pane fade in active">
+        <p>
+            <table class="table table-condensed table-striped" width="800" border="0" cellspacing="0" cellpadding="0">
+                    <thead  nowrap>
+                        <tr>
+                            <th>Temas de Ayuda</th>
+                            <th>Abiertos</th>
+                            <th>Vencidos</th>
+                            <th>Cerrados</th>
+                            <th>Reabiertos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach($contadorEstados as $claveEstado => $contEstado){ ?>
+                        <tr>
+                            <th><?php echo $claveEstado; ?></th>
+                            <td><?php echo $contadorEstados[$claveEstado]["abiertos"]; ?></td>
+                            <td><?php echo $contadorEstados[$claveEstado]["vencidos"]; ?></td>
+                            <td><?php echo $contadorEstados[$claveEstado]["cerrados"]; ?></td>
+                            <td><?php echo $contadorEstados[$claveEstado]["reabiertos"]; ?></td>
+                        </tr>
+                        <?php } ?>
+                    </tbody>
+            </table>
+        </p>
+    </div>
+    <div id="tablaProyectos" class="tab-pane fade">
+        <p>
+            <table class="table table-condensed table-striped" width="800" border="0" cellspacing="0" cellpadding="0">
+                <thead  nowrap>
+                    <tr>
+                        <th>Proyecto</th>
+                        <th>Incidente</th>
+                        <th>Incidente Prioridad Baja</th>
+                        <th>Incidente Prioridad Media</th>
+                        <th>Incidente Prioridad Alta</th>
+                        <th>Incidente Crítico</th>
+                        <th>Mejora</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach($contadorProyectos as $claveProyecto => $contProyecto){ ?>
+                    <tr>
+                        <th><?php echo $claveProyecto; ?></th>
+                        <td><?php echo $contadorProyectos[$claveProyecto]["incidente"]; ?></td>
+                        <td><?php echo $contadorProyectos[$claveProyecto]["incidenteBaja"]; ?></td>
+                        <td><?php echo $contadorProyectos[$claveProyecto]["incidenteMedia"]; ?></td>
+                        <td><?php echo $contadorProyectos[$claveProyecto]["incidenteAlta"]; ?></td>
+                        <td><?php echo $contadorProyectos[$claveProyecto]["incidenteCritico"]; ?></td>
+                        <td><?php echo $contadorProyectos[$claveProyecto]["mejora"]; ?></td>
+                    </tr>
+                    <?php } ?>
+                    
+                </tbody>
+            </table>
+        </p>
+    </div>
+</div>
+

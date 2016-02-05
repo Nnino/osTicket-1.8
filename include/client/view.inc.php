@@ -154,12 +154,68 @@ if($ticket->getThreadCount() && ($thread=$ticket->getClientThread())) {
 <?php
 
 if (!$ticket->isClosed() || $ticket->isReopenable()) { ?>
+<br>
+<h2><?php echo __('Post a Reply');?></h2>
+<br>
+Destinatarios: 
+<ul id="lista_collab">
+    <?php
+        $query_proyecto = 'SELECT ost_user.id as user_id, ost_user.name as user_name FROM ost_user WHERE ost_user.org_id=2';
+        $resUser = db_query($query_proyecto);
+        $usuarios = array();
+        while($resultUser = db_fetch_array($resUser)){
+            $usuarios[$resultUser['user_id']] = $resultUser['user_name'];
+        }
+
+        $query_coll = 'SELECT ostcoll.id as coll_id, ostcoll.user_id as coll_user_id FROM ost_ticket_collaborator ostcoll WHERE ostcoll.ticket_id='.$ticket->getId();
+        $resColl = db_query($query_coll);
+        $collaboradores = array();
+        
+        while($resultColl = db_fetch_array($resColl)){
+            $collaboradores[$resultColl['coll_user_id']] = new Collaborator($resultColl['coll_id']);
+            echo "<li valor='".$resultColl['coll_user_id'].",".$ticket->getId().",".$ticket->getOwnerId().",".str_replace(" ",",",$usuarios[$resultColl['coll_user_id']])."' type='circle'>";
+                echo $collaboradores[$resultColl['coll_user_id']]."<a href='javascript:void(0);' class='delete_collab' id=".$resultColl['coll_id']." href=''> Eliminar</a>\n";
+            echo "</li>";
+        }
+        if(empty($collaboradores)){
+            echo "<li class='vacio' type='circle'> No hay colaboradores asignados. </li>";
+        }
+
+    ?>
+</ul>
+<br>
+<table>
+     <tr>
+        <td width="200">
+            <label><strong><?php echo __('Add Recipients'); ?>:</strong></label>
+        </td>
+        <td>
+            <?php
+                echo"<select name=collaboradores id=select_collab>"; 
+                    echo "<option value=0>Seleccione un colaborador</option>\n"; 
+                    foreach ($usuarios as $idUsuario => $row) {
+                        if(!$collaboradores[$idUsuario] && $ticket->getOwnerId()!=$idUsuario){
+                            echo "<option value=".$idUsuario.",".$ticket->getId().",".$ticket->getOwnerId().",".str_replace(" ",",",$usuarios[$idUsuario]).">".$usuarios[$idUsuario]."</option>\n"; 
+                        }  
+                    } 
+                echo "</select>";
+            ?> 
+
+            
+        </td>
+        <td>
+            <input type="submit" id="button_add_colab" value="Agregar"> 
+        </td>
+     </tr>
+
+</table>
 <form id="reply" action="tickets.php?id=<?php echo $ticket->getId(); ?>#reply" name="reply" method="post" enctype="multipart/form-data">
     <?php csrf_token(); ?>
-    <h2><?php echo __('Post a Reply');?></h2>
+    
     <input type="hidden" name="id" value="<?php echo $ticket->getId(); ?>">
     <input type="hidden" name="a" value="reply">
     <table border="0" cellspacing="0" cellpadding="3" style="width:100%">
+
         <tr>
             <td colspan="2">
                 <?php
@@ -192,5 +248,76 @@ if (!$ticket->isClosed() || $ticket->isReopenable()) { ?>
         <input type="button" value="<?php echo __('Cancel');?>" onClick="history.go(-1)">
     </p>
 </form>
-<?php
-} ?>
+
+<?php } ?>
+<script type="text/javascript">
+    $(document).ready(function(){
+        $(document).on("click", "a.delete_collab",function(){
+            removeCollab($(this));
+        });
+        $("#button_add_colab").click(function(event) {
+            event.preventDefault();
+            var texto = $("#select_collab").val();
+            var texto_separado = texto.split(",");
+            var idUsr = texto_separado[0];
+            var idTickt = texto_separado[1];
+            var idOwnr = texto_separado[2];
+            var nameUsr = texto_separado[3]+" "+texto_separado[4];
+            $.post("include/client/add-collaborator.k.php",
+                {
+                    idUser: idUsr,
+                    idTicket: idTickt,
+                    idOwner: idOwnr
+                },
+                function(datos){
+                    if(datos==='err1'){
+                        alert("Informacion faltante");
+                    } else if(datos==='err2'){
+                        alert("El creador no puede ser colaborador");
+                    } else if(datos==='err3'){
+                        alert("Problema al obtener email");
+                    } else if(datos==='err4'){
+                        alert("Problema al agregar colaborador");
+                    } else if(datos==='err5'){
+                        alert("Falló conexión con la base de datos");
+                    } else {
+                        var arreglo = datos.split(" ");
+                        var contenido = nameUsr+' &lt;'+arreglo[0]+'&gt;';
+                        $("#lista_collab").append("<li valor='"+texto+"' type='circle'>"+contenido+"<a href='javascript:void(0);' class='delete_collab' id="+arreglo[1]+" href=''> Eliminar</a></li>\n");
+                        $("#select_collab option[value='"+texto+"']").remove();
+                        $("#lista_collab .vacio").remove();
+                    }
+                    
+                });
+            return false;
+        });
+
+        function removeCollab(entry){
+            var padre = $(entry).parent();
+            var idPadre = $(padre).attr("valor");
+            var texto_separado = idPadre.split(",");
+            var nameUser = texto_separado[3]+" "+texto_separado[4];
+            var idColl = $(entry).attr("id");
+            $.post("include/client/delete-collaborator.k.php",
+            {
+                id: idColl
+            },
+            function(datos){
+                if(datos === '00'){
+                    $(padre).remove();
+                    if($("#lista_collab").has("li").length===0){
+                       $("#lista_collab").append("<li class='vacio' type='circle'> No hay colaboradores asignados. </li>"); 
+                    }
+                    $("#select_collab").append("<option value="+idPadre+">"+nameUser+"</option>\n");
+                    
+                } else if(datos === 'err5'){
+                    alert("Falló conexión con la base de datos");
+                } else if(datos === 'err1'){
+                    alert("Informacion faltante");
+                }
+            }); 
+        };
+
+    });
+
+</script>
